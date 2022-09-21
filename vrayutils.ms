@@ -1295,6 +1295,7 @@ fn convertFrom_CoronaMultiMapTex inTexture = (
 		vrayMST.addSubtex addItems
 	)
 
+	-- 3DGROUND Edition
 	try (if inTexture.mode == 5 do vrayMST.from_id = 1) catch()
 	try (if inTexture.mode == 2 do vrayMST.from_id = 6) catch()
 
