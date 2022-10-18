@@ -1238,6 +1238,438 @@ fn convertFrom_CoronaSkinMtl orig_mtl = (
 
 	vr
 )
+--**********************************************************************************************************************************
+--CORONA PHYSICAL material conversion
+
+	--functions
+	----Clamp
+	fn clamp val minVal maxVal  =
+	(
+		if val < minVal then val = minVal
+		else if val > maxVal then val = maxVal
+		return val
+	)
+
+	----remap
+	fn remapValue oldVal oldMin oldMax newMin newMax =
+	(
+		oldRange = oldMax - oldMin
+		newRange = newMax - newMin
+		newVal = (oldVal / oldRange) * newRange
+	)
+
+	----Disney Specular to plain IoR
+	fn getIorFromDisney specularValue =
+	(
+		/*
+		const float f0      = max(0.f, specularValue * 0.08f);
+		const float divisor = 1.f - sqrt(f0);
+		if (divisor <= 0.f) {
+			return 3.f;
+		}
+		return clamp(2.f / divisor - 1.f, 1.f, 3.f);
+		*/
+
+		f0 = amax #(0.0 , specularValue * 0.08)
+		divisor = 1.0 - sqrt(f0)
+		outIoR = if divisor <= 0.0 then 3.0	else (clamp (2.0 / divisor - 1.0) 1.0 3.0)
+	)
+
+	fn setupComplexIoR cpm=
+	(
+		theMap = VRayPluginNodeTex name:"complexIoRTex" plugin:"TexComplexFresnel"
+		theMap.n_red = cpm.complexIorNRed
+		theMap.n_green = cpm.complexIorNGreen
+		theMap.n_blue = cpm.complexIorNBlue
+		theMap.k_red = cpm.complexIorKRed
+		theMap.k_green = cpm.complexIorKGreen
+		theMap.k_blue = cpm.complexIorKBlue
+
+		theMap
+	)
+
+
+	-- @param cpm = Corona physical material
+	-- @param vrm = V-Ray material
+	-- "Full" mode will use vraycomptex and other such maps to ensure the closest possible conversion result (to factor in amounts and other multipliers we do not have.)
+	-- "Simple" will skip all that and just replug the maps, and set their influence.
+	fn  convertFrom_CoronaPhysicalMtl cpm mode=
+	(
+		vrm = vrayMtl name:("vray_" + cpm.name)
+
+		--material flags
+		----Metalness
+		isMetal = cpm.metalnessMode as booleanClass --we need this for the complex IoR
+		vrm.reflection_metalness = cpm.metalnessMode as float
+
+		----Metalness Texture
+		if cpm.metalnessTexmap != undefined do
+		(
+			isMetal = true
+			vrm.texmap_metalness = cpm.metalnessTexmap
+		)
+
+		----Thinness
+		isThin = cpm.useThinMode
+		vrm.refraction_thinWalled = isThin
+
+		----Self Illumination
+		/*
+		Our material's self-illumination matches color*level for lights when the level is expressed in *scene units*.
+		Their materials match color*level for lights when the level is expressed in *Radiance*.
+		However, when they render our lights, they take the scene units multiplier and treat it straight as if it was radiance.
+		The selfillum level should be rechecked!
+		*/
+		vrm.selfIllumination_multiplier = cpm.selfIllumLevel
+		vrm.selfIllumination = cpm.selfIllumColor
+		vrm.texmap_self_illumination = cpm.selfIllumTexmap
+
+		----gBuffer channel
+		vrm.effectsChannel = if cpm.gBufferOverride >= 0 then cpm.gBufferOverride else cpm.effectsChannel -- -1 uses the normal gbuffer id, anything else overrides it.
+
+		----Alpha mode
+		----ours is automatic
+
+		----propagate masks
+		case cpm.renderElementPropagation of
+		(
+			0 :()
+			1 :
+			(
+				vrm.reflection_affectAlpha = 2
+			)
+			2 :
+			(
+				vrm.refraction_affectAlpha = 2
+			)
+			3 :
+			(
+				vrm.reflection_affectAlpha = 2
+				vrm.refraction_affectAlpha = 2
+			)
+		)
+
+		----Roughness/Glossiness
+		isRough = not (cpm.roughnessMode as booleanClass)
+		vrm.brdf_useRoughness = isRough  --boolean
+
+		----Specular Mode and IoR
+		isDisney = cpm.iorMode as booleanClass --0 is default, 1 is disney.
+		if isDisney then
+		(
+			vrm.refraction_ior = getIorFromDisney cpm.baseIor
+		)
+		else
+		(
+			vrm.refraction_ior = cpm.baseIor
+		)
+
+		---- Complex IoR
+		if isMetal and cpm.useComplexIor do
+		(
+			vrm.texmap_reflection = setupComplexIoR cpm
+			vrm.reflection_fresnel = off
+		)
+
+		--Shading Layers
+		----Base Color
+		if mode == "full" then
+		(
+			if cpm.baseLevel == 1.0 then --no base level is set, no need for composite maps.
+			(
+				vrm.diffuse =  cpm.basecolor --this is always true, regardless of metallicity.
+				vrm.texmap_diffuse = cpm.baseTexmap --always copy this one. Metals will override it as needed (f.e. with complex IoR)
+				if isMetal then
+				(
+					vrm.reflection = cpm.edgeColor
+					if vrm.texmap_reflection == undefined do vrm.texmap_reflection = cpm.edgeColorTexmap --if complex IoR was set, we don't want to override the texture.
+					vrm.texmap_reflection_multiplier = cpm.edgeColorMapAmount
+					vrm.refraction_ior = 1.6 --Vlado's suggestion.
+				)
+				else
+				(
+					vrm.reflection = white
+					vrm.refraction_ior = cpm.baseIor
+					vrm.texmap_refractionIOR= cpm.baseIorTexmap
+				)
+			)
+			else --the value is lower than 1.0, we need output maps to fix this.
+			(
+				vrm.diffuse = cpm.basecolor*cpm.baseLevel --this is always true, regardless of metallicity.
+				if cpm.baseTexmap!= undefined do
+				(
+					vrm.texmap_diffuse = output map1:cpm.baseTexmap name:"Base Level Explicitation"
+					vrm.texmap_diffuse.output.RGB_Level = cpm.baseLevel
+				)
+				if isMetal then
+				(
+					vrm.reflection = cpm.edgeColor*cpm.baseLevel
+					if vrm.texmap_reflection == undefined and cpm.edgeColorTexmap != undefined do
+					(
+						vrm.texmap_reflection = output map1:cpm.edgeColorTexmap name:"Base Level Explicitation"
+						vrm.texmap_reflection.output.RGB_Level = cpm.baseLevel
+					)
+					vrm.texmap_reflection_multiplier = cpm.edgeColorMapAmount
+					vrm.refraction_ior = 1.6 --Vlado's suggestion.
+				)
+				else
+				(
+					vrm.reflection = white * cpm.baseLevel -- Convert to gray baseLevel color
+					vrm.refraction_ior = cpm.baseIor
+					vrm.texmap_refractionIOR= cpm.baseIorTexmap
+				)
+			)
+		)
+		else --mode is "simple"
+		(
+			vrm.diffuse =  cpm.basecolor --this is always true, regardless of metallicity.
+			vrm.texmap_diffuse = cpm.baseTexmap --always copy this one. Metals will override it as needed (f.e. with complex IoR)
+			if isMetal then
+			(
+				vrm.reflection = cpm.edgeColor
+				if vrm.texmap_reflection == undefined do vrm.texmap_reflection = cpm.edgeColorTexmap --if complex IoR was set, we don't want to override the texture.
+				vrm.texmap_reflection_multiplier = cpm.edgeColorMapAmount
+				vrm.refraction_ior = 1.6 --Vlado's suggestion.
+			)
+			else
+			(
+				vrm.reflection = white
+				vrm.refraction_ior = cpm.baseIor
+				vrm.texmap_refractionIOR= cpm.baseIorTexmap
+			)
+		)
+
+		----Base Roughness
+		vrm.reflection_glossiness = cpm.baseRoughness --the V-Ray material is already set to use the right mode.
+		vrm.texmap_reflectionGlossiness = cpm.baseRoughnessTexmap
+		vrm.refraction_glossiness = cpm.baseRoughness
+		vrm.texmap_refractionGlossiness = cpm.baseRoughnessTexmap
+
+		----Base Bump
+		vrm.texmap_bump_multiplier = remapValue cpm.baseBumpMapAmount -99. 99. -1000. 1000.
+		vrm.texmap_bump = cpm.baseBumpTexmap
+
+		----Base Anisotropy
+		vrm.anisotropy = cpm.baseAnisotropy
+		vrm.texmap_anisotropy = cpm.baseAnisotropyTexmap
+		vrm.anisotropy_rotation = cpm.baseAnisoRotation + 90
+		vrm.texmap_anisotropy_rotation = cpm.baseAnisoRotationTexmap
+		vrm.anisotropy_derivation = cpm.anisotropyOrientationMode
+		vrm.anisotropy_channel = cpm.anisotropyOrientationUvwChannel
+
+		----Base Translucency
+		if isThin and cpm.translucencyFraction > 0.0 do
+		(
+
+			vrm.translucency_on = 6
+			vrm.translucency_amount = cpm.translucencyFraction
+			vrm.translucency_color = cpm.translucencyColor
+			if cpm.translucencyFractionTexmap != undefined and mode == "full" then --mapped translucency amount, make explicit multiplying by translucency texture
+			(
+				vrm.texmap_translucent = vrayCompTex name:"textured translucency fraction explicitation" sourceA:cpm.translucencyColorTexmap sourceB:cpm.translucencyFractionTexmap operator:3
+			)
+			else
+			(
+				vrm.texmap_translucent = cpm.translucencyColorTexmap --no map, no worry.
+			)
+			vrm.texmap_translucent_multiplier = cpm.translucencyColorMapAmount --as this control is reused on our side, the map amount has to be set where the effect is active
+			vrm.texmap_translucent_on = cpm.translucencyColorTexmapOn
+		)
+
+		----Refraction
+		vrm.refraction = white * cpm.refractionAmount -- Convert to gray reflectionAmount color
+		if cpm.refractionAmountTexmap != undefined and cpm.refractionAmountTexmapOn do vrm.texmap_refraction = rgb_tint map1:cpm.refractionAmountTexmap red:white green:white blue:white name:"refraction amount texture mono transform"
+		vrm.refraction_affectShadows = not cpm.useCaustics
+		vrm.refraction_dispersion_on = cpm.dispersionEnable
+		vrm.refraction_dispersion = cpm.dispersion
+
+		----Thin Absorption
+		if isThin do
+		(
+			vrm.refraction_fogColor = cpm.thinAbsorptionColor
+			vrm.texmap_refraction_fog = cpm.thinAbsorptionTexmap
+			vrm.texmap_refraction_fog_multiplier = cpm.thinAbsorptionMapAmount
+			vrm.texmap_refraction_fog_on = cpm.thinAbsorptionTexmapOn
+		)
+
+		----Opacity
+		if cpm.opacityColor != white do --as we don't have a color, but just a texture, i need to do liek below.
+		(
+			vrm.texmap_opacity = vrayColor color:cpm.opacityColor name:"Opacity Color" rgb_multiplier:cpm.opacityLevel
+		)
+		if cpm.opacityTexmap != undefined do --i need this to cater for the opacity level, separate from the opacity map amount.
+		(
+			if mode == "full" then
+			(
+				vrmColorMap = vrayColor color:cpm.opacityColor name:"Opacity Color" rgb_multiplier:cpm.opacityLevel
+				vrm.texmap_opacity = vrayCompTex sourceA:vrmColorMap sourceB:cpm.opacityTexmap operator:3 multiplier:(cpm.opacityMapAmount/100.0)
+			)
+			else --mode is "simple"
+			(
+				vrm.texmap_opacity = cpm.opacityTexmap
+				vrm.texmap_opacity_multiplier = cpm.opacityMapAmount
+			)
+		)
+		if cpm.opacityCutout do vrm.option_opacityMode = 1
+
+		----Displacement
+		----I'll only plug the texture as the rest of the settings aren't present on the v-ray material
+		----No map influence for the CPM.
+		vrm.texmap_displacement = cpm.displacementTexmap
+
+		----Clearcoat
+		vrm.coat_amount = cpm.clearcoatAmount
+
+		vrm.texmap_coat_amount = cpm.clearcoatAmountTexmap
+		vrm.coat_glossiness = cpm.clearcoatRoughness --this is properly set to rough/gloss at the top for the whole shader, pipe 1:1
+		vrm.texmap_coat_glossiness = cpm.clearcoatRoughnessTexmap
+		vrm.coat_ior = cpm.clearcoatIor
+		vrm.texmap_coat_ior = cpm.clearcoatIorTexmap
+		vrm.coat_color = cpm.clearcoatAbsorptionColor
+		vrm.texmap_coat_color = cpm.clearcoatAbsorptionTexmap
+		vrm.texmap_coat_bump_multiplier = remapValue cpm.clearcoatBumpMapAmount -99. 99. -1000. 1000. --this hasn't got an Ui in the right place for the corona material. so odd.
+		vrm.texmap_coat_bump = cpm.clearcoatBumpTexmap
+
+
+		----Sheen
+		/*
+		Sheen has an amount and a textured amount, which we lack.
+		*/
+
+		if mode == "full" and ((cpm.sheenAmount > 0.0 and cpm.sheenAmount < 1.0) or cpm.sheenAmountTexmap != undefined) then --influence lower than 1.0, and/or textured influence, need output maps
+		(
+			if cpm.sheenAmountTexmap == undefined then --just the level, this is doable with outputs.
+			(
+				vrm.sheen_color = cpm.sheenColor * cpm.sheenAmount
+				if cpm.sheenColorTexmap != undefined do
+				(
+					vrm.texmap_sheen = output map1:cpm.sheenColorTexmap name:"Sheen Amount Explicitation"
+					vrm.texmap_sheen.output.rgb_level = cpm.sheenAmount
+					vrm.texmap_sheen_multiplier = cpm.sheenColorMapAmount
+				)
+			)
+			else --we have a texture driving amount, need a comptex
+			(
+				sheenAmountMap = vrayColor color:white rgb_multiplier:cpm.sheenAmount --made the float amount a color.
+				monoAmountMap =  rgb_tint map1:cpm.sheenAmountTexmap red:white green:white blue:white name:"Sheen amount texture mono transform"
+				globalSheenAmountMap = vrayCompTex name:"globalSheenAmountMap" sourceA:sheenAmountMap sourceB:monoAmountMap operator:3
+				globalSheenAmountMap.multiplier=(cpm.sheenAmountMapAmount/100.)
+				sheenColorMap = vrayColor color:cpm.sheenColor
+
+				if cpm.sheenColorTexmap != undefined then --
+				(
+					sheenTexturedColour = vrayCompTex name:"textured Sheen amount explicitation" sourceA:sheenColorMap sourceB:cpm.sheenColorTexmap operator:9 multiplier:(cpm.sheenColorMapAmount/100.)
+					vrm.texmap_sheen = vrayCompTex name:"globalSheenColorMap" sourceA:sheenTexturedColour sourceB:globalSheenAmountMap operator:3
+				)
+				else
+				(
+					texturedAmount = vrayCompTex name:"textured Sheen amount explicitation" sourceA:sheenColorMap sourceB:monoMap operator:3
+					texturedAmount.multiplier=(cpm.sheenColorMapAmount/100.) --oddly it's 0-1 while the UI shows 0-100
+					vrm.texmap_sheen = texturedAmount
+				)
+			)
+		)
+		else --influence at 1.0, or we chose simple mode. we can just plug away.
+		(
+			vrm.sheen_color = cpm.sheenColor * cpm.sheenAmount
+			vrm.texmap_sheen = cpm.sheenColorTexmap
+			vrm.texmap_sheen_multiplier = cpm.sheenColorMapAmount
+		)
+		vrm.sheen_glossiness = cpm.sheenRoughness
+		vrm.texmap_sheen_glossiness = cpm.sheenRoughnessTexmap
+
+		----Fog
+		vrm.refraction_fogColor = cpm.volumetricAbsorptionColor
+		vrm.texmap_refraction_fog = cpm.volumetricAbsorptionTexmap
+		vrm.texmap_refraction_fog_multiplier = cpm.volumetricAbsorptionMapAmount
+		vrm.texmap_refraction_fog_on = cpm.volumetricAbsorptionTexmapOn
+		vrm.refraction_fogDepth = cpm.attenuationDistance
+
+		----Volumetric Scattering
+		if cpm.volumetricScatteringColor != black or cpm.volumetricScatteringTexmap != undefined do
+		(
+			vrm.translucency_on = 5 --vol. scatter
+			vrm.translucency_color = cpm.volumetricScatteringColor
+			vrm.texmap_translucent = cpm.volumetricScatteringTexmap
+			vrm.texmap_translucent_multiplier = cpm.volumetricScatteringMapAmount
+			vrm.texmap_translucent_on = cpm.volumetricScatteringTexmapOn
+		)
+
+		----SSS
+		if cpm.sssAmount > 0.0 or cpm.sssAmountTexmap != undefined do
+		(
+			vrm.translucency_on = 6 --SSS
+			vrm.translucency_amount = cpm.sssAmount
+			vrm.translucency_color = cpm.sssScatterColor
+			if mode == "full" and (cpm.sssAmountTexmap != undefined and cpm.sssAmountTexmapOn) then --textured influence. Make explicit.
+			(
+				monoMap = rgb_tint map1:cpm.sssAmountTexmap red:white green:white blue:white name:"SSS amount texture mono transform"
+				vrm.texmap_translucent = vrayCompTex name:"textured SSS amount explicitation" sourceA:monoMap sourceB:cpm.sssScatterTexmap operator:3
+				vrm.texmap_translucent_multiplier = cpm.sssScatterMapAmount
+				vrm.texmap_translucent_on = cpm.sssScatterTexmapOn --troublesome, as the map is explicitated above.
+			)
+			else --mode is "simple", or no textured influence
+			(
+				vrm.texmap_translucent = cpm.sssScatterTexmap --no map, no worry.
+				vrm.texmap_translucent_multiplier = cpm.sssScatterMapAmount
+				vrm.texmap_translucent_on =	cpm.sssScatterTexmapOn
+			)
+			vrm.refraction_fogDepth = cpm.sssRadius * 100
+			if cpm.sssRadiusTexmap != undefined and cpm.sssRadiusTexmapOn do
+			(
+				vrm.texmap_refraction_fog = output map1:cpm.sssRadiusTexmap name:"SSS Radiut units conversion"
+				vrm.texmap_refraction_fog.output.RGB_Level = 1
+				vrm.texmap_refraction_fog_multiplier = cpm.sssRadiusMapAmount
+				vrm.texmap_refraction_fog_on = cpm.sssRadiusTexmapOn
+			)
+		)
+
+		--extra maps
+		----Environment: i plug the refraction one first, and the reflection one then, so to give it higher priority.
+		----As we only have one slot, this ensures the reflection one is the one that will be chosen if both are plugged in the CPM.
+		vrm.texmap_environment = cpm.bgOverrideRefractTexmap
+		vrm.texmap_environment = cpm.bgOverrideReflectTexmap
+
+		--Unconditional Map Influences
+		vrm.texmap_diffuse_multiplier = cpm.baseMapAmount
+		vrm.texmap_reflectionGlossiness_multiplier = cpm.baseRoughnessMapAmount
+		vrm.texmap_refraction_multiplier = cpm.refractionAmountMapAmount
+
+		vrm.texmap_self_illumination_multiplier = cpm.selfillumMapAmount
+		vrm.texmap_anisotropy_multiplier = cpm.baseAnisotropyMapAmount
+		vrm.texmap_anisotropy_rotation_multiplier = cpm.baseAnisoRotationMapAmount
+		vrm.texmap_refractionIOR_multiplier = cpm.baseIorMapAmount
+		vrm.texmap_coat_amount_multiplier = cpm.clearcoatAmountMapAmount
+		vrm.texmap_coat_ior_multiplier = cpm.clearcoatIorMapAmount
+		vrm.texmap_coat_color_multiplier = cpm.clearcoatAbsorptionMapAmount
+		vrm.texmap_coat_glossiness_multiplier = cpm.clearcoatRoughnessMapAmount
+		vrm.texmap_sheen_glossiness_multiplier = cpm.sheenRoughnessMapAmount
+
+		--Unconditional Map Toggles
+		vrm.texmap_diffuse_on = cpm.baseTexmapOn
+		vrm.texmap_reflection_on = cpm.edgeColorTexmapOn
+		vrm.texmap_reflectionGlossiness_on = cpm.baseRoughnessTexmapOn
+		vrm.texmap_bump_on = cpm.baseBumpTexmapOn
+		vrm.texmap_opacity_on = cpm.opacityTexmapOn
+		vrm.texmap_displacement_on = cpm.displacementTexmapOn
+		vrm.texmap_self_illumination_on = cpm.selfIllumTexmapOn
+		vrm.texmap_metalness_on = cpm.metalnessTexmapOn
+		vrm.texmap_anisotropy_on = cpm.baseAnisotropyTexmapOn
+		vrm.texmap_anisotropy_rotation_on = cpm.baseAnisoRotationTexmapOn
+		vrm.texmap_refractionIOR_on = cpm.baseIorTexmapOn
+		vrm.texmap_coat_amount_on = cpm.clearcoatAmountTexmapOn
+		vrm.texmap_coat_glossiness_on = cpm.clearcoatRoughnessTexmapOn
+		vrm.texmap_coat_ior_on = cpm.clearcoatIorTexmapOn
+		vrm.texmap_coat_color_on = cpm.clearcoatAbsorptionTexmapOn
+		vrm.texmap_coat_bump_on = cpm.clearcoatBumpTexmapOn
+		vrm.texmap_sheen_on = cpm.sheenColorTexmapOn
+		vrm.texmap_sheen_glossiness_on = cpm.sheenRoughnessTexmapOn
+		vrm.texmap_environment_on = cpm.bgOverrideReflectTexmapOn or cpm.bgOverrideRefractTexmapOn
+
+		--V-Ray material output
+		vrm
+	)
+--**********************************************************************************************************************************
 
 fn convertFrom_CoronaColorTex inTexture = (
 	vrayC = VRayColor name:("vray_"+inTexture.name) alpha:inTexture.alpha rgb_multiplier: inTexture.multiplier
@@ -1296,8 +1728,8 @@ fn convertFrom_CoronaMultiMapTex inTexture = (
 	)
 
 	-- 3DGROUND Edition
-	try (if inTexture.mode == 5 do vrayMST.from_id = 1) catch()
-	try (if inTexture.mode == 2 do vrayMST.from_id = 6) catch()
+	try (if inTexture.mode == 5 do vrayMST.from_id = 1) catch ()
+	try (if inTexture.mode == 2 do vrayMST.from_id = 6) catch ()
 
 	for i = 1 to inTexture.items do (
 		vrayMST.texmap_color[i] = inTexture.colors[i]
@@ -1874,6 +2306,7 @@ fn createVRayMtl orig_mtl = (
 		CoronaVolumeMtl: convertFrom_CoronaVolumeMtl orig_mtl
 		CoronaHairMtl: convertFrom_CoronaHairMtl orig_mtl
 		CoronaSkinMtl: convertFrom_CoronaSkinMtl orig_mtl
+		CoronaPhysicalMtl: convertFrom_CoronaPhysicalMtl orig_mtl "full"
 
 
 		-- Do not convert Arch&Design materials - V-Ray supports them directly
@@ -1996,6 +2429,19 @@ fn showMtlSlotInCurrentSMEView activeSlot= (
 	if (vrmatView != undefined) then (
 		vrmatView.CreateNode m [0,0]
 	)
+)
+
+fn mtlExistsInSME mtlName= (
+	for i=1 to sme.GetNumViews() do (
+		view=sme.GetView(i)
+		for j=1 to view.GetNumNodes() do (
+			node=view.GetNode(j)
+			if (node.name == mtlName) then (
+				return true
+			)
+		)
+	)
+	return false
 )
 
 fn warningToSelectGeometry theOperationName= (
@@ -3257,6 +3703,11 @@ fn convertB2HDRI_Texmap texmap=(
 			tex.cropplace_width = texmap.clipw
 			tex.cropplace_height = texmap.cliph
 
+			--Convert channel output
+			tex.rgbOutput = texmap.rgbOutput
+			tex.monoOutput = texmap.monoOutput
+			tex.alphaSource = texmap.alphaSource
+
 			--Convert output parameters including curve control
 			replaceInstances tex.output (copy texmap.output)
 
@@ -3667,7 +4118,7 @@ macroScript VRayBitmap2VRayBitmapTexmapConverter
 
 macroScript VRayMeshExport
 	category:"VRay"
-	buttontext:"V-Ray mesh export"
+	buttontext:".vrmesh exporter"
 	tooltip:"Exports the selected meshes to an external file"
 (
 	-- This check implementation is present in all maxscripts, to make them independent on other scripts
@@ -3736,6 +4187,27 @@ macroScript VRayProxy
 	on execute do (StartObjectCreation VRayProxy)
 )
 
+macroScript VRayDecal
+	category:"VRay"
+	buttonText:"V-Ray Decal"
+	toolTip: "Create V-Ray Decal"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (StartObjectCreation VRayDecal)
+)
+
 macroScript VRayFur
 	category:"VRay"
 	buttonText:"V-Ray Fur"
@@ -3779,6 +4251,27 @@ macroScript VRayFur
 		)
 		theHold.Accept("V-Ray Fur")
 	)
+)
+
+macroScript VRayVolumeGrid
+	category:"VRay"
+	buttonText:"V-Ray VolumeGrid"
+	toolTip: "Create V-Ray VolumeGrid"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (StartObjectCreation VRayVolumeGrid)
 )
 
 macroScript VRayPlane
@@ -3910,6 +4403,7 @@ macroScript VRayVolumeGrid
 macroScript VRayLight_Plane
 	category:"VRay"
 	buttonText:"V-Ray Plane Light"
+	iconName: ":/VRayToolbar/PlaneLight"
 	toolTip: "Create V-Ray Plane Light"
 (
 	-- This check implementation is present in all maxscripts, to make them independent on other scripts
@@ -3925,14 +4419,16 @@ macroScript VRayLight_Plane
 	on isEnabled do (checkVRayRenderer())
 	on isVisible do (checkVRayRenderer())
 
-	fn setType obj = (if (classof(obj)==VRayLight) do (obj.type = 0))
-
-	on execute do (StartObjectCreation VRayLight newNodeCallback: setType)
+	on execute do (
+		setCurrentVRayLightCreationType 0
+		StartObjectCreation VRayLight
+	)
 )
 
 macroScript VRayLight_Dome
 	category:"VRay"
 	buttonText:"V-Ray Dome Light"
+	iconName: ":/VRayToolbar/DomeLight"
 	toolTip: "Create V-Ray Dome Light"
 (
 	-- This check implementation is present in all maxscripts, to make them independent on other scripts
@@ -3948,14 +4444,16 @@ macroScript VRayLight_Dome
 	on isEnabled do (checkVRayRenderer())
 	on isVisible do (checkVRayRenderer())
 
-	fn setType obj = (if (classof(obj)==VRayLight) do (obj.type = 1))
-
-	on execute do (StartObjectCreation VRayLight newNodeCallback: setType)
+	on execute do (
+		setCurrentVRayLightCreationType 1
+		StartObjectCreation VRayLight
+	)
 )
 
 macroScript VRayLight_Sphere
 	category:"VRay"
 	buttonText:"V-Ray Sphere Light"
+	iconName: ":/VRayToolbar/SphereLight"
 	toolTip: "Create V-Ray Sphere Light"
 (
 	-- This check implementation is present in all maxscripts, to make them independent on other scripts
@@ -3971,14 +4469,16 @@ macroScript VRayLight_Sphere
 	on isEnabled do (checkVRayRenderer())
 	on isVisible do (checkVRayRenderer())
 
-	fn setType obj = (if (classof(obj)==VRayLight) do (obj.type = 2))
-
-	on execute do (StartObjectCreation VRayLight newNodeCallback: setType)
+	on execute do (
+		setCurrentVRayLightCreationType 2
+		StartObjectCreation VRayLight
+	)
 )
 
 macroScript VRayLight_Mesh
 	category:"VRay"
 	buttonText:"V-Ray Mesh Light"
+	iconName: ":/VRayToolbar/MeshLight"
 	toolTip: "Create V-Ray Mesh Light"
 (
 	-- This check implementation is present in all maxscripts, to make them independent on other scripts
@@ -3994,14 +4494,41 @@ macroScript VRayLight_Mesh
 	on isEnabled do (checkVRayRenderer())
 	on isVisible do (checkVRayRenderer())
 
-	fn setType obj = (if (classof(obj)==VRayLight) do (obj.type = 3))
+	on execute do (
+		setCurrentVRayLightCreationType 3
+		StartObjectCreation VRayLight
+	)
+)
 
-	on execute do (StartObjectCreation VRayLight newNodeCallback: setType)
+macroScript VRayLight_Disc
+	category:"VRay"
+	buttonText:"V-Ray Disc Light"
+	iconName: ":/VRayToolbar/DiscLight"
+	toolTip: "Create V-Ray Disc Light"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		setCurrentVRayLightCreationType 4
+		StartObjectCreation VRayLight
+	)
 )
 
 macroScript VRayIES
 	category:"VRay"
 	buttonText:"V-Ray IES Light"
+	iconName: ":/VRayToolbar/IESLight"
 	toolTip: "Create V-Ray IES Light"
 (
 	-- This check implementation is present in all maxscripts, to make them independent on other scripts
@@ -4023,6 +4550,7 @@ macroScript VRayIES
 macroScript VRayAmbientLight
 	category:"VRay"
 	buttonText:"V-Ray Ambient Light"
+	iconName: ":/VRayToolbar/AmbientLight"
 	toolTip: "Create V-Ray Ambient Light"
 (
 	-- This check implementation is present in all maxscripts, to make them independent on other scripts
@@ -4044,6 +4572,7 @@ macroScript VRayAmbientLight
 macroScript VRaySun
 	category:"VRay"
 	buttonText:"V-Ray Sun"
+	iconName: ":/VRayToolbar/SunLight"
 	toolTip: "Create V-Ray Sun"
 (
 	-- This check implementation is present in all maxscripts, to make them independent on other scripts
@@ -4307,6 +4836,46 @@ macroScript VRayDisplacementMod
 	)
 )
 
+macroScript VRayEnmeshMod
+	category:"VRay"
+	buttonText:"V-Ray EnMesh Mod"
+	toolTip: "V-Ray EnMesh Modifier"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer() AND (ValidModifier $ VRayEnmeshMod))
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		if ($==undefined) do (warningToSelectGeometry "V-Ray EnMesh Modifier")
+
+		theHold.begin()
+		if ((superClassOf $)==GeometryClass) then (
+			if (ValidModifier $ VRayEnmeshMod) do (
+				addModifier $ (VRayEnmeshMod())
+			)
+		) else if (isKindOf $ ObjectSet) then (
+			for obj in $ do (
+				if (((superClassOf obj)==GeometryClass) AND (ValidModifier obj VRayEnmeshMod)) do (
+					addModifier obj (VRayEnmeshMod())
+				)
+			)
+		)
+		else (
+			print "Please select a geometry object to apply V-Ray EnMesh Modifier!"
+		)
+		theHold.Accept("V-Ray EnMesh Mod")
+	)
+)
+
 macroScript VRayOrnatrixMod
 	category:"VRay"
 	buttonText:"V-Ray Ornatrix Mod"
@@ -4404,8 +4973,19 @@ macroScript VRayCameraLister
 	on isVisible do (checkVRayRenderer())
 
 	on execute do (
-		if (vrayCameraLister!=undefined) do vrayCameraLister()
+		if (vrayCameraLister!=undefined) do (
+			vrayCameraLister()
+		)
 	)
+
+	on closeDialogs do
+	(
+		if (vrayDestroyCameraLister!=undefined) do (
+			vrayDestroyCameraLister()
+		)
+	)
+
+	on isChecked return vrayCameraListerIsOpen()
 )
 
 -- Macroscript for the Viewport IPR button - visible when the current renderer is V-Ray/V-Ray GPU and we
@@ -4912,4 +5492,612 @@ macroscript VRayDebugShadingBary
 		)
 	)
 	on Execute do (setVRayDebugShadingMode (ourMode))
+)
+
+macroscript VRaySubmitToChaosCloud
+	category:"VRay"
+	buttonText:"Submit to Chaos Cloud"
+	toolTip: "Submit to Chaos Cloud rendering"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		if (vrayCloudSubmit!=undefined) do (
+			vrayCloudSubmit()
+		)
+	)
+)
+
+macroscript VRayChaosCosmosBrowser
+	category:"VRay"
+	buttonText:"Chaos Cosmos browser"
+	toolTip: "Cosmos browser"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		if (showCosmosBrowser!=undefined) then (showCosmosBrowser()) else (print "Cannot find Cosmos browser plugin")
+	)
+)
+
+--Convert scene materials to .vrmat
+--@param onlySelectedMtls -> true - converts only selected materials
+--                                     -> false- converts all scene materials
+--@param toOneVRmat -> true - all vray materials are converted to one .vrmat file
+--                              -> false - all vray material are converted to separated .vrmat files
+fn convertSceneMaterials onlySelectedMtls toOneVRmat =
+(
+	local listMtls = if onlySelectedMtls then (for iNode in selection collect iNode.material) else sceneMaterials
+	if toOneVRmat then (
+		local vrmatFilePath=getSaveFileName caption:"VRMAT Export Path" types:"VRMAT files (*.vrmat)|*.vrmat"
+		if (vrmatFilePath != undefined) do (
+			format "Exporting material...\n"
+			format "saving vrmat to %\n" vrmatFilePath
+
+			local saveDir = getFilenamePath vrmatFilePath
+			local f = openFile vrmatFilePath mode:"w"
+
+			openVismatTag f
+
+			for i=1 to listMtls.count do (
+				print listMtls[i]
+				clearArrBitMapTxtPaths()
+				dumpSelectedMaterial listMtls[i] f vismatmode:"ONLYONEVISMAT"
+				createBmpFilesInVismatFolder saveDir
+			)
+
+			closeVismatTag f
+			flush f
+			close f
+
+			format "Done\n"
+		)
+	)
+	else (
+		local saveDir = getSavePath caption:"VRMAT Export Directory"
+		if (saveDir != undefined) do (
+			for i=1 to listMtls.count do (
+				print listMtls[i]
+				local iMat = listMtls[i]
+				local matSaveDir = saveDir + "\\" + iMat.name
+				makeDir matSaveDir all:true
+				local fileName =  (matSaveDir + "\\" + iMat.name + ".vrmat")
+
+				format "Exporting material...\n"
+				format "saving vrmat to %\n" fileName
+
+				local f = openFile fileName mode:"w"
+
+				clearArrBitMapTxtPaths()
+				openVismatTag f
+				dumpSelectedMaterial iMat f
+				closeVismatTag f
+				createBmpFilesInVismatFolder matSaveDir
+
+				flush f
+				close f
+
+				format "Done\n"
+			)
+		)
+	)
+)
+
+macroscript ConvertSelectedObjsMtlsToSingleVRMAT
+	category:"VRay"
+	buttonText:"to a single .vrmat file"
+	toolTip: "Convert selectet objects materials to single .vrmat file"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		convertSceneMaterials true true
+	)
+)
+
+macroscript ConvertSelectedObjsMtlsToSeparateVRMAT
+	category:"VRay"
+	buttonText:"to separate .vrmat files"
+	toolTip: "Convert selectet objects materials to separate .vrmat files"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		convertSceneMaterials true false
+	)
+)
+
+macroscript ConvertAllSceneMtlsToSingleVRMAT
+	category:"VRay"
+	buttonText:"to a single .vrmat file"
+	toolTip: "Convert all scene materials to single .vrmat file"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		convertSceneMaterials false true
+	)
+)
+
+macroscript ConvertAllSceneMtlsToSeparateVRMAT
+	category:"VRay"
+	buttonText:"to separate .vrmat files"
+	toolTip: "Convert all scene materials to separate .vrmat files"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		convertSceneMaterials false false
+	)
+)
+
+--Convert material to .vrmat
+--@param mtl - selected/existed material
+--@param saveDir - path for the .vrmat file which name is constructed based on material name and .vrmat extension
+fn convertMaterialToVRMATfile mtl saveDir = (
+	if (saveDir != undefined and mtl != undefined) do (
+		print mtl
+		saveDir = saveDir + "\\" + mtl.name
+		makeDir saveDir all:true
+		local fileName =  (saveDir + "\\" + mtl.name + ".vrmat")
+
+		format "Exporting material...\n"
+		format "saving vrmat to %\n" fileName
+
+		local f = openFile fileName mode:"w"
+
+		clearArrBitMapTxtPaths()
+		openVismatTag f
+		dumpSelectedMaterial mtl f
+		closeVismatTag f
+		createBmpFilesInVismatFolder saveDir
+
+		flush f
+		close f
+
+		format "Done\n"
+	)
+)
+
+macroscript ConvertPickedFromMtlEditorToVRMAT
+	category:"VRay"
+	buttonText:"Pick from Material Editor"
+	toolTip: "Pick material from Material Editor and convert it to .vrmat file"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		local mtl = MaterialBrowseDlg()
+		local saveDir = getSavePath caption:"VRMAT Export Directory"
+
+		convertMaterialToVRMATfile mtl saveDir
+	)
+)
+
+macroscript HelpGetStartedWithVRay
+	category:"VRay"
+	buttonText:"Get started with V-Ray"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		shellLaunch  "https://www.chaos.com/vray/3ds-max/learn" ""
+	)
+)
+
+macroscript HelpDocs
+	category:"VRay"
+	buttonText:"Help docs"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		shellLaunch  "https://docs.chaos.com/display/VMAX/V-Ray+for+3ds+Max+Help" ""
+	)
+)
+
+macroscript HelpSubmitRequest
+	category:"VRay"
+	buttonText:"Submit a support request"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		shellLaunch  "https://support.chaos.com/hc/en-us/requests/new" ""
+	)
+)
+
+macroscript HelpChaosForum
+	category:"VRay"
+	buttonText:"Chaos Forum"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		shellLaunch  "https://forums.chaos.com/" ""
+	)
+)
+
+macroscript HelpRegisterVRayMenus
+	category:"VRay"
+	buttonText:"Register V-Ray menus"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		updateVRayMenus()
+	)
+)
+
+macroscript HelpSetDefaultUI
+	category:"VRay"
+	buttonText:"Set default MAX V-Ray UI"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		local defaultUIScheme=pathconfig.appendPath (getdir #UI) "DefaultUI.ui"
+		loadCUIScheme defaultUIScheme
+		local defaultsPath = pathconfig.AppendPath (getdir #maxroot) (Sysinfo.getMaxLanguage())[5]
+		local defaultsPathMAXvray = pathconfig.AppendPath defaultsPath "defaults\\MAX.vray\\"
+		setIniSetting (GetMAXIniFile()) "Directories" "Defaults" defaultsPathMAXvray
+	)
+)
+
+macroscript VRaySetLocalLicenseSettings
+	category:"VRay"
+	buttonText:"Set local license settings"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		if (vrayShowLocalLicenseServer!=undefined) then (vrayShowLocalLicenseServer()) else (print "Cannot open V-Ray local license server dialog")
+	)
+)
+
+macroscript VRayManageChaosLicenseServer
+	category:"VRay"
+	buttonText:"Manage Chaos License Server"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		shellLaunch  "http://localhost:30304/#" ""
+	)
+)
+
+fn assignVRAYTypeMtl vrmtl = (
+	if(vrmtl!=undefined) do (
+		local activeslot = medit.GetActiveMtlSlot()
+		MatEditor.Open()
+		medit.PutMtlToMtlEditor vrmtl activeslot
+
+		if(selection.count>0) do (
+			for iNode in selection do (
+				if(superClassOf iNode == GeometryClass) then (
+					iNode.material = vrmtl
+					for iChild in iNode.children do (
+						iChild.material = vrmtl
+					)
+				) else if(isKindOf iNode ObjectSet) do (
+					for obj in iNode do (
+						if(superClassOf obj == GeometryClass) do (
+							obj.material = vrmtl
+						)
+					)
+				)
+			)
+		)
+
+		if(MatEditor.mode==#advanced) do showMtlSlotInSME activeslot
+	)
+)
+
+macroscript VRayMtl
+	category:"VRay"
+	buttonText:"VRayMtl"
+	iconName:":/VRayToolbar/VrayMtl"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		local vrmtl = CreateInstance VRayMtl
+		assignVRAYTypeMtl vrmtl
+	)
+)
+
+macroscript VRayFastSSS2
+	category:"VRay"
+	buttonText:"VRayFastSSS2"
+	iconName:":/VRayToolbar/VrayFastSSS"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		local vrmtl = CreateInstance VRayFastSSS2
+		assignVRAYTypeMtl vrmtl
+	)
+)
+
+macroscript VRayHairNextMtl
+	category:"VRay"
+	buttonText:"VRayHairNextMtl"
+	iconName:":/VRayToolbar/VrayHair"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		local vrmtl = CreateInstance VRayHairNextMtl
+		assignVRAYTypeMtl vrmtl
+	)
+)
+
+macroscript VRayALSurfaceMtl
+	category:"VRay"
+	buttonText:"VRayALSurfaceMtl"
+	iconName:":/VRayToolbar/VrayALSurface"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		local vrmtl = CreateInstance VRayALSurfaceMtl
+		assignVRAYTypeMtl vrmtl
+	)
+)
+
+macroscript VRay2SidedMtl
+	category:"VRay"
+	buttonText:"VRay2SidedMtl"
+	iconName:":/VRayToolbar/Vray2Sided"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		local vrmtl = CreateInstance VRay2SidedMtl
+		assignVRAYTypeMtl vrmtl
+	)
+)
+
+macroscript VRayBlendMtl
+	category:"VRay"
+	buttonText:"VRayBlendMtl"
+	iconName:":/VRayToolbar/VrayBlendMtl"
+(
+	-- This check implementation is present in all maxscripts, to make them independent on other scripts
+	fn checkVRayRenderer = (
+		local enabled=false
+		if (renderers.production!=undefined) do (
+			cid=renderers.production.classid
+			enabled=((cid[1]==1941615238) and (cid[2]==2012806412) or (cid[1]==1770671000) and (cid[2]==1323107829))
+		)
+		enabled
+	)
+
+	on isEnabled do (checkVRayRenderer())
+	on isVisible do (checkVRayRenderer())
+
+	on execute do (
+		local vrmtl = CreateInstance VRayBlendMtl
+		assignVRAYTypeMtl vrmtl
+	)
 )
