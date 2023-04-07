@@ -875,10 +875,11 @@ fn convertFrom_CoronaMtl orig_mtl = (
 
 	-- Translucency
 	if orig_mtl.levelTranslucency > 0.0 then(
+		
 		newVRay2SidedMtl = VRay2SidedMtl name:("vray "+orig_mtl.name)
 		newVRay2SidedMtl.frontMtl = r
-
-			if orig_mtl.texmapTranslucency == undefined then(
+	
+			/*if orig_mtl.texmapTranslucency == undefined then(
 				newVRay2SidedMtl.texmap_translucency_multiplier = 100.0*orig_mtl.levelTranslucency
 				newVRay2SidedMtl.Translucency = orig_mtl.colorTranslucency
 			)
@@ -887,7 +888,26 @@ fn convertFrom_CoronaMtl orig_mtl = (
 				newVRay2SidedMtl.texmap_translucency_multiplier = 100.0*orig_mtl.levelTranslucency
 				newVRay2SidedMtl.Translucency = white
 				newVRay2SidedMtl.texmap_translucency = theMix
-			)
+			)*/
+		
+		
+		/*newVRay2SidedMtl.force1SidedSubMtls = false
+		newVRay2SidedMtl.backMtlOn = true
+		local cp = copy (newVRay2SidedMtl.frontMtl)
+		newVRay2SidedMtl.backMtl = cp*/
+		
+		---!!! MastaMan edition
+		
+		local vc = VRayColor()
+		vc.color = color 128 128 128
+		
+		local cc = ColorCorrection()	
+		cc.name = "vray_"+orig_mtl.name
+		cc.map = vc
+		
+		newVRay2SidedMtl.texmap_translucency = cc		
+		newVRay2SidedMtl.texmap_translucency_multiplier = 26
+		
 		return newVRay2SidedMtl
 	) else return r
 )
@@ -1754,6 +1774,15 @@ fn convertFrom_CoronaMixTex inTexture = (
 	return vrayCT
 )
 
+-- !!! MastaMan Edition
+fn convertFrom_CoronaFrontBackTex inTexture = (
+	if (inTexture.frontTexmap != undefined) do (
+		return inTexture.frontTexmap
+	)
+	vrayClr = VRayColor color:inTexture.frontColor name:("vray_"+inTexture.name)
+	return vrayClr	
+)
+
 fn convertFrom_CoronaAoTex inTexture = (
 	vrayDt = VRayDirt occluded_color:inTexture.colorOccluded unoccluded_color:inTexture.colorUnoccluded \
 	radius:inTexture.maxDistance texmap_radius:inTexture.texmapDistance texmap_occluded_color:inTexture.texmapOccluded \
@@ -2189,7 +2218,8 @@ fn createVRayTexture inTexture= (
 		Raytrace:convertFrom_RaytraceMap inTexture
 		CoronaOutput: if inTexture.inputTexmap != undefined do inTexture.inputTexmap
 		CoronaRaySwitch: VRayColor color:red name:("vray_"+inTexture.name)
-		CoronaFrontBack: VRayColor color:inTexture.frontColor name:("vray_"+inTexture.name)
+		-- !!! MastaMan edition
+		CoronaFrontBack: convertFrom_CoronaFrontBackTex inTexture --VRayColor color:inTexture.frontColor name:("vray_"+inTexture.name)
 		CoronaColor: convertFrom_CoronaColorTex inTexture
 		CoronaMultiMap: convertFrom_CoronaMultiMapTex inTexture
 		CoronaMix: convertFrom_CoronaMixTex inTexture
