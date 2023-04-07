@@ -138,7 +138,7 @@ rollout vraySceneConverterRollout "V-Ray scene converter" width: 460 height: 210
 
 fn convertFrom_Standard origMtl = (
 	r=VRayMtl()
-	r.name="vray_"+origMtl.name
+	r.name="_VRB."+origMtl.name
 
 	r.texmap_bump=origMtl.bumpMap
 	if (r.texmap_bump!=undefined) then (
@@ -207,7 +207,7 @@ fn convertFrom_Standard origMtl = (
 
 fn convertFrom_Raytrace origMtl = (
 	r=VRayMtl()
-	r.name="vray_"+origMtl.name
+	r.name="_VRB."+origMtl.name
 
 	r.texmap_bump=origMtl.bumpMap
 	if (r.texmap_bump!=undefined) then (
@@ -270,7 +270,7 @@ fn convertFrom_Raytrace origMtl = (
 
 fn convertFrom_fR_Advanced origMtl = (
 	r=VRayMtl()
-	r.name="vray_"+origMtl.name
+	r.name="_VRB."+origMtl.name
 
 	-- diffuse
 	r.diffuse=origMtl.diffuseColor
@@ -327,7 +327,7 @@ fn convertFrom_fR_Advanced origMtl = (
 
 fn convertFrom_fR_Metal origMtl = (
 	r=VRayMtl()
-	r.name="vray_"+origMtl.name
+	r.name="_VRB."+origMtl.name
 
 	r.diffuse=origMtl.diffuseColor
 	r.texmap_diffuse=origMtl.diffuseMap
@@ -344,7 +344,7 @@ fn convertFrom_fR_Metal origMtl = (
 
 fn convertFrom_fR_Glass origMtl = (
 	r=VRayMtl()
-	r.name="vray_"+origMtl.name
+	r.name="_VRB."+origMtl.name
 
 	r.diffuse=origMtl.diffuseColor
 	r.texmap_diffuse=origMtl.diffuseMap
@@ -374,7 +374,7 @@ fn createVRayTexture=undefined
 
 fn convertFromBlend orig_mtl = (
 	r=VRayBlendMtl()
-	r.name="vray_"+orig_mtl.name
+	r.name="_VRB."+orig_mtl.name
 
 	r.baseMtl = createVRayMtl orig_mtl.map1
 	r.coatMtl[1] = createVRayMtl orig_mtl.map2
@@ -389,7 +389,7 @@ fn convertFromBlend orig_mtl = (
 
 fn convertFromShellac orig_mtl = (
 	r=VRayBlendMtl()
-	r.name="vray_"+orig_mtl.name
+	r.name="_VRB."+orig_mtl.name
 	r.additiveMode=true
 
 	r.baseMtl = createVRayMtl orig_mtl.shellacMtl1
@@ -401,7 +401,7 @@ fn convertFromShellac orig_mtl = (
 
 fn convertFromDoubleSided orig_mtl = (
 	r=VRay2SidedMtl()
-	r.name="vray_"+orig_mtl.name
+	r.name="_VRB."+orig_mtl.name
 
 	r.frontMtl = createVRayMtl orig_mtl.material1
 	r.backMtl = createVRayMtl orig_mtl.material2
@@ -475,7 +475,7 @@ fn convertFrom_PhysicalMaterial im =
 (
 	msgString = ("Working on " + im.name + "\n")
 	om = VRayMtl()
-	om.name = "vray_"+im.name
+	om.name = "_VRB."+im.name
 
 	-- Diffuse
 
@@ -709,7 +709,7 @@ fn convertFrom_PhysicalMaterial im =
 
 fn convertFrom_Architectural orig_mtl = (
 	r=VRayMtl()
-	r.name="vray_"+orig_mtl.name
+	r.name="_VRB."+orig_mtl.name
 
 	-- diffuse component
 	r.diffuse=orig_mtl.diffuse
@@ -758,7 +758,7 @@ fn convertFrom_Architectural orig_mtl = (
 
 fn convertFrom_CoronaMtl orig_mtl = (
 	r=VRayMtl()
-	r.name="vray_"+orig_mtl.name
+	r.name="_VRB."+orig_mtl.name
 
 	--Diffuse
 	r.diffuse = orig_mtl.levelDiffuse * orig_mtl.colorDiffuse
@@ -902,7 +902,7 @@ fn convertFrom_CoronaMtl orig_mtl = (
 		vc.color = color 128 128 128
 		
 		local cc = ColorCorrection()	
-		cc.name = "vray_"+orig_mtl.name
+		cc.name = "_VRB."+orig_mtl.name
 		cc.map = vc
 		
 		newVRay2SidedMtl.texmap_translucency = cc		
@@ -914,7 +914,7 @@ fn convertFrom_CoronaMtl orig_mtl = (
 
 fn convertFrom_CoronaLayeredMtl orig_mtl = (
 	r=VRayBlendMtl()
-	r.name="vray_"+orig_mtl.name
+	r.name="_VRB."+orig_mtl.name
 
 	r.baseMtl = orig_mtl.baseMtl
 	for iLayer = 1 to orig_mtl.layers.count - 1 do (
@@ -935,7 +935,7 @@ fn convertFrom_CoronaLayeredMtl orig_mtl = (
 
 fn convertFrom_CoronaLightMtl orig_mtl = (
 	r=VRayLightMtl()
-	r.name="vray_"+orig_mtl.name
+	r.name="_VRB."+orig_mtl.name
 
 	r.color = orig_mtl.color
 	r.multiplier = orig_mtl.intensity
@@ -954,7 +954,7 @@ fn convertFrom_CoronaLightMtl orig_mtl = (
 
 fn convertFrom_CoronaRaySwitchMtl orig_mtl = (
 	r = VRayOverrideMtl()
-	r.name="vray_"+orig_mtl.name
+	r.name="_VRB."+orig_mtl.name
 
 	r.baseMtl = orig_mtl.directMtl
 	r.giMtl = orig_mtl.giMtl
@@ -966,7 +966,7 @@ fn convertFrom_CoronaRaySwitchMtl orig_mtl = (
 
 fn convertFrom_CoronaVolumeMtl orig_mtl = (
 	vr=VRayScatterVolume()
-	vr.name="vray_"+orig_mtl.name
+	vr.name="_VRB."+orig_mtl.name
 
 	vr.overall_color = orig_mtl.absorptionColor
 	vr.sss_color = orig_mtl.scatteringColor
@@ -1006,7 +1006,7 @@ fn convertFrom_CoronaVolumeMtl orig_mtl = (
 
 fn convertFrom_CoronaShadowCatcherMtl orig_mtl = (
 	vrwrap=VRayMtlWrapper()
-	vrwrap.name="vray_"+orig_mtl.name
+	vrwrap.name="_VRB."+orig_mtl.name
 
 	vrwrap.matteSurface = true
 	vrwrap.alphaContribution = case orig_mtl.alphaMode of (
@@ -1047,7 +1047,7 @@ fn convertFrom_CoronaShadowCatcherMtl orig_mtl = (
 
 fn convertFrom_CoronaHairMtl orig_mtl = (
 	vr=VRayHairNextMtl()
-	vr.name="vray_"+orig_mtl.name
+	vr.name="_VRB."+orig_mtl.name
 
 	vr.melanin = orig_mtl.melanin
 	vr.random_melanin = orig_mtl.randomizeMelanin
@@ -1132,7 +1132,7 @@ fn convertFrom_CoronaHairMtl orig_mtl = (
 
 fn convertFrom_CoronaSkinMtl orig_mtl = (
 	vr=VRayALSurfaceMtl()
-	vr.name="vray_"+orig_mtl.name
+	vr.name="_VRB."+orig_mtl.name
 
 	vr.sss_density_scale = orig_mtl.sssRadiusScale
 
@@ -1315,7 +1315,7 @@ fn convertFrom_CoronaSkinMtl orig_mtl = (
 	-- "Simple" will skip all that and just replug the maps, and set their influence.
 	fn  convertFrom_CoronaPhysicalMtl cpm mode=
 	(
-		vrm = vrayMtl name:("vray_" + cpm.name)
+		vrm = vrayMtl name:("_VRB." + cpm.name)
 
 		--material flags
 		----Metalness
@@ -1692,7 +1692,7 @@ fn convertFrom_CoronaSkinMtl orig_mtl = (
 --**********************************************************************************************************************************
 
 fn convertFrom_CoronaColorTex inTexture = (
-	vrayC = VRayColor name:("vray_"+inTexture.name) alpha:inTexture.alpha rgb_multiplier: inTexture.multiplier
+	vrayC = VRayColor name:("_VRB."+inTexture.name) alpha:inTexture.alpha rgb_multiplier: inTexture.multiplier
 	if inTexture.method == 0 do (
 		vrayC.color_mode = 0
 		vrayC.color = inTexture.color
@@ -1736,7 +1736,7 @@ fn convertFrom_CoronaColorTex inTexture = (
 )
 
 fn convertFrom_CoronaMultiMapTex inTexture = (
-	vrayMST = VRayMultiSubTex name:("vray_"+inTexture.name)
+	vrayMST = VRayMultiSubTex name:("_VRB."+inTexture.name)
 	if vrayMST.texmap_num > inTexture.items do (
 		local removeItems = vrayMST.texmap_num - inTexture.items
 		vrayMST.deleteSubtex (inTexture.items + 1) removeItems
@@ -1760,7 +1760,7 @@ fn convertFrom_CoronaMultiMapTex inTexture = (
 )
 
 fn convertFrom_CoronaMixTex inTexture = (
-	vrayCT = VRayCompTex sourceA: inTexture.texmapBottom sourceB: inTexture.texmapTop name:("vray_"+inTexture.name)
+	vrayCT = VRayCompTex sourceA: inTexture.texmapBottom sourceB: inTexture.texmapTop name:("_VRB."+inTexture.name)
 	vrayCT.operator = case inTexture.mixOperation of (
 		0: 0 -- Add
 		1: 1 -- subtract
@@ -1779,14 +1779,14 @@ fn convertFrom_CoronaFrontBackTex inTexture = (
 	if (inTexture.frontTexmap != undefined) do (
 		return inTexture.frontTexmap
 	)
-	vrayClr = VRayColor color:inTexture.frontColor name:("vray_"+inTexture.name)
+	vrayClr = VRayColor color:inTexture.frontColor name:("_VRB."+inTexture.name)
 	return vrayClr	
 )
 
 fn convertFrom_CoronaAoTex inTexture = (
 	vrayDt = VRayDirt occluded_color:inTexture.colorOccluded unoccluded_color:inTexture.colorUnoccluded \
 	radius:inTexture.maxDistance texmap_radius:inTexture.texmapDistance texmap_occluded_color:inTexture.texmapOccluded \
-	texmap_unoccluded_color:inTexture.texmapUnoccluded name:("vray_"+inTexture.name)
+	texmap_unoccluded_color:inTexture.texmapUnoccluded name:("_VRB."+inTexture.name)
 
 	if (hasProperty inTexture "invert") then (
 		vrayDt.invert_normal = inTexture.invert
@@ -1810,7 +1810,7 @@ fn convertFrom_CoronaAoTex inTexture = (
 )
 
 fn convertFrom_CoronaNormalTex inTexture = (
-	vrayNM = VRayNormalMap normal_map:inTexture.normalMap name:("vray_"+inTexture.name)
+	vrayNM = VRayNormalMap normal_map:inTexture.normalMap name:("_VRB."+inTexture.name)
 
 	if ((hasProperty vrayNM #flip_red) and
 	    (hasProperty inTexture #flipred)) then (
@@ -1836,12 +1836,12 @@ fn convertFrom_CoronaNormalTex inTexture = (
 )
 
 fn convertFrom_CoronaRoundEdges inTexture = (
-	vrRoundEdges = VRayEdgesTex name:("vray_"+inTexture.name) roundedCorners_radius:inTexture.radius \
+	vrRoundEdges = VRayEdgesTex name:("_VRB."+inTexture.name) roundedCorners_radius:inTexture.radius \
 	roundedCorners_sameObjectOnly:(inTexture.excludeMode == 1)
 )
 
 fn convertFrom_CoronaDistance inTexture = (
-	vrDistTex = VRayDistanceTex  name:("vray_"+inTexture.name)
+	vrDistTex = VRayDistanceTex  name:("_VRB."+inTexture.name)
 
 	vrDistTex.objects = inTexture.nodes
 	vrDistTex.texmap_far_on = inTexture.texmapFarOn
@@ -1865,7 +1865,7 @@ fn convertFrom_CoronaDistance inTexture = (
 )
 
 fn convertFrom_CoronaTriplanar inTexture = (
-	vrTriplanarTex = VRayTriplanarTex name:("vray_"+inTexture.name)
+	vrTriplanarTex = VRayTriplanarTex name:("_VRB."+inTexture.name)
 
 	vrTriplanarTex.texture_mode = if inTexture.onlyTexmapX == on then 0 else 1
 
@@ -1900,7 +1900,7 @@ fn convertFrom_CoronaTriplanar inTexture = (
 
 fn convertFrom_CoronaBitmap inTexture = (
 	local texHDRI=VRayBitmap()
-	texHDRI.name="vray_"+inTexture.name
+	texHDRI.name="_VRB."+inTexture.name
 
 	if inTexture.filename != "" and inTexture.filename != undefined then (
 		texHDRI.HDRIMapName = inTexture.filename
@@ -1994,7 +1994,7 @@ fn convertFrom_CoronaBitmap inTexture = (
 )
 
 fn convertFrom_CoronaBumpConverter inTexture = (
-	local vrColor2BumpTex = VRayColor2Bump name:("vray_"+inTexture.name)
+	local vrColor2BumpTex = VRayColor2Bump name:("_VRB."+inTexture.name)
 	vrColor2BumpTex.map = inTexture.input
 
 	vrColor2BumpTex
@@ -2016,7 +2016,7 @@ fn getTexSettingsBase inTex = (
 )
 
 fn convertFrom_CoronaColorCorrect inTexture = (
-	local colorCorrectionTex = Color_Correction name:("vray_"+inTexture.name)
+	local colorCorrectionTex = Color_Correction name:("_VRB."+inTexture.name)
 	colorCorrectionTex.map = inTexture.inputTexmap
 
 	-- Get base map which settings will be used
@@ -2052,7 +2052,7 @@ fn convertFrom_CoronaColorCorrect inTexture = (
 fn convertFrom_AutodeskBitmap texmap=(
 	if (texmap!=undefined and (classof texmap)==Autodesk_Map) then (
 		local texHDRI=VRayBitmap()
-		texHDRI.name="vray_"+texmap.name
+		texHDRI.name="_VRB."+texmap.name
 
 		if (IsProperty texmap "Parameters_Source") and (undefined != texmap.Parameters_Source) do
 		(
@@ -2146,7 +2146,7 @@ fn convertFrom_AutodeskBitmap texmap=(
 fn convertFrom_RaytraceMap texmap=(
 	if (texmap!=undefined and (classof texmap)==Raytrace) then (
 		local texVRayColor=VRayColor()
-		texVRayColor.name="vray_"+texmap.name
+		texVRayColor.name="_VRB."+texmap.name
 		texVRayColor.color=(color 0 0 0)
 
 		texVRayColor
@@ -2217,17 +2217,17 @@ fn createVRayTexture inTexture= (
 		Autodesk_Map: convertFrom_AutodeskBitmap inTexture
 		Raytrace:convertFrom_RaytraceMap inTexture
 		CoronaOutput: if inTexture.inputTexmap != undefined do inTexture.inputTexmap
-		CoronaRaySwitch: VRayColor color:red name:("vray_"+inTexture.name)
+		CoronaRaySwitch: VRayColor color:red name:("_VRB."+inTexture.name)
 		-- !!! MastaMan edition
-		CoronaFrontBack: convertFrom_CoronaFrontBackTex inTexture --VRayColor color:inTexture.frontColor name:("vray_"+inTexture.name)
+		CoronaFrontBack: convertFrom_CoronaFrontBackTex inTexture --VRayColor color:inTexture.frontColor name:("_VRB."+inTexture.name)
 		CoronaColor: convertFrom_CoronaColorTex inTexture
 		CoronaMultiMap: convertFrom_CoronaMultiMapTex inTexture
 		CoronaMix: convertFrom_CoronaMixTex inTexture
 		CoronaAo: convertFrom_CoronaAoTex inTexture
 		CoronaNormal: convertFrom_CoronaNormalTex inTexture
-		coronasky: VRaySky name:("vray_"+inTexture.name)
+		coronasky: VRaySky name:("_VRB."+inTexture.name)
 		CoronaWire: VRayEdgesTex edgesColor:inTexture.edgeColor widthType:(if inTexture.widthMode == 1 then 0 else 1) thickness:inTexture.edgeWidthWorld \
-											pixelWidth:inTexture.edgeWidthPixels name:("vray_"+inTexture.name)
+											pixelWidth:inTexture.edgeWidthPixels name:("_VRB."+inTexture.name)
 
 		CoronaDistance: convertFrom_CoronaDistance inTexture
 		CoronaRoundEdges: convertFrom_CoronaRoundEdges inTexture
@@ -2332,7 +2332,7 @@ fn createVRayMtl orig_mtl = (
 		CoronaLayeredMtl: convertFrom_CoronaLayeredMtl orig_mtl
 		CoronaLightMtl: convertFrom_CoronaLightMtl orig_mtl
 		CoronaRaySwitchMtl: convertFrom_CoronaRaySwitchMtl orig_mtl
-		CoronaPortalMtl: VRayMtl name:("vray_" + orig_mtl.name)
+		CoronaPortalMtl: VRayMtl name:("_VRB." + orig_mtl.name)
 		CoronaVolumeMtl: convertFrom_CoronaVolumeMtl orig_mtl
 		CoronaHairMtl: convertFrom_CoronaHairMtl orig_mtl
 		CoronaSkinMtl: convertFrom_CoronaSkinMtl orig_mtl

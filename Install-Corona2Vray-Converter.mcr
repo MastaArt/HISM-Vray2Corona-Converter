@@ -6,18 +6,18 @@
 	https://3dground.net/
 */
 
-fn installVray2CoronaConverter = (
+fn installCorona2VrayConverter = (
 	local currScript = getThisScriptFileName()	
 	local pth = getFileNamePath currScript
-	local scr = pth + "Vray2Corona-Converter.ms"
+	local scr = pth + "Corona2Vray-Converter.ms"
 	
 	if (not doesFileExist scr) do return messageBox (scr + " not found!\nPlease download script from GitHub and try again!") title: "Error!"
 	
 	n = "\n"
-	ex = "macroScript RunVrayToCoronaConverter" + n
+	ex = "macroScript RunCoronaToVrayConverter" + n
 	ex += "category:\"[3DGROUND]\"" + n
-	ex += "toolTip:\"Vray2Corona\"" + n
-	ex += "buttontext:\"Vray2Corona\"" + n
+	ex += "toolTip:\"Corona2Vray\"" + n
+	ex += "buttontext:\"Corona2Vray\"" + n
 	ex += "(" + n
 	ex += "on execute do (" + n
 	ex += "try(fileIn(@\"" + scr + "\")) catch(messageBox \"Script not found! Please reinstall script!\" title: \"Warning!\")" + n
@@ -26,11 +26,11 @@ fn installVray2CoronaConverter = (
 	
 	execute ex
 	
-	m = "Vray2Corona Converter installed success!" + n
+	m = "Corona2Vray Converter installed success!" + n
 	m += "You can find it in [3DGROUND] category."
 	
 	messageBox m title: "Installed" beep: false
 )
 
 
-installVray2CoronaConverter()
+installCorona2VrayConverter()
