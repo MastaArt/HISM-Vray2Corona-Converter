@@ -1800,8 +1800,8 @@ fn convertFrom_CoronaAoTex inTexture = (
 	)
 
 	---!!! MastaMan edition (commented)
-	/*if inTexture.excludeMode == 1 and inTexture.excludeList.count != 0 do vrayDt.excludeList = inTexture.excludeList
-	if inTexture.excludeMode == 3 do vrayDt.consider_same_object_only = true*/
+	if inTexture.occlusionFrom == 1 and inTexture.excludeList.count != 0 do vrayDt.excludeList = inTexture.excludeList
+	if inTexture.occlusionFrom == 3 do vrayDt.consider_same_object_only = true
 
 	vrayDt.texmap_radius = if inTexture.texmapDistance != undefined do inTexture.texmapDistance
 	vrayDt.texmap_occluded_color = if inTexture.texmapOccluded != undefined do inTexture.texmapOccluded
@@ -1839,7 +1839,7 @@ fn convertFrom_CoronaNormalTex inTexture = (
 fn convertFrom_CoronaRoundEdges inTexture = (
 	---!!! MastaMan edition (param false)
 	vrRoundEdges = VRayEdgesTex name:("_VRB."+inTexture.name) roundedCorners_radius:inTexture.radius \	
-	roundedCorners_sameObjectOnly:(false)
+	roundedCorners_sameObjectOnly:(inTexture.occlusionFrom == 1)
 )
 
 fn convertFrom_CoronaDistance inTexture = (
