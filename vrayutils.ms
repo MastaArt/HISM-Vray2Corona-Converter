@@ -1839,7 +1839,7 @@ fn convertFrom_CoronaNormalTex inTexture = (
 fn convertFrom_CoronaRoundEdges inTexture = (
 	---!!! MastaMan edition (param false)
 	vrRoundEdges = VRayEdgesTex name:("_VRB."+inTexture.name) roundedCorners_radius:inTexture.radius \	
-	roundedCorners_sameObjectOnly:(inTexture.occlusionFrom == 1)
+	roundedCorners_sameObjectOnly:(inTexture.excludeMode == 1)
 )
 
 fn convertFrom_CoronaDistance inTexture = (
